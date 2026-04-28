@@ -1,0 +1,31 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Backend of cropguard ai",
+  "homepage": "https://github.com/waynemwashuma/cropguard-ai#readme",
+  "bugs": {
+    "url": "https://github.com/waynemwashuma/cropguard-ai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/waynemwashuma/cropguard-ai.git"
+  },
+  "license": "UNLICENSED",
+  "author": "Wayne Mwashuma",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start":"npm run dev",
+    "dev": "nodemon ./src/main.js",
+    "build": ""
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "onnxruntime-node": "^1.24.3",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
