@@ -246,13 +246,105 @@ def _mp_fn(rank, flags):
     best_acc = 0.0
     xm.rendezvous('initialization_complete')
 
-    for epoch in tqdm(range(1, EPOCHS + 1), desc="Training"):
+    for epoch in range(1, EPOCHS + 1):
         train_sampler.set_epoch(epoch)
         model.train() # Set model to training mode
 
         para_train_loader = pl.ParallelLoader(train_loader, [device]).per_device_loader(device)
 
+        train_loss = 0.0
+        correct = 0
+        total = 0
+
+        if xr.global_ordinal() == 0:
+            pbar = tqdm(para_train_loader, total=len(train_loader), desc=f"Epoch {epoch}/{EPOCHS+1} [Train]")
+            loader_iter = pbar
+        else:
+            loader_iter = para_train_loader
+
+        for inputs, targets in loader_iter:
+            # clear gradients
+            optimizer.zero_grad()
+
+            inputs, targets_a, targets_b, lam, aug_type = mixup_cutmix_data(inputs, targets) # use default params
+
+            outputs = model(inputs)
+
+            loss = lam * criterion(outputs, targets_a) + (1. - lam) * criterion(outputs, targets_b)
+
+            loss.backward()
+
+            # TPU style optimizer step
+            xm.optimizer_step(optimizer)
+
+            with torch.no_grad():
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                target_dominant = targets_a if lam >= 0.5 else targets_b
+                total += targets.size(0)
+                correct += predicted.eq(target_dominant).sum().item()
+
+                if xr.global_ordinal() == 0:
+                    pbar.set_postfix(loss=f"{loss.item():.4f}", type=aug_type)
         
+        # Collect and sum all the train losses from each worker
+        total_train_loss = xm.mesh_reduce('train_loss', train_loss, lambda x: sum(x))
+        total_correct = xm.mesh_reduce('train_correct', correct, lambda x: sum(x))
+        total_samples = xm.mesh_reduce('train_total', total, lambda x: sum(x))
+        
+        avg_train_loss = total_train_loss / len(train_loader) / xr.world_size()
+        train_acc = 100. * total_correct / total_samples
 
+        # Do evaluation after each epoch
+        model.eval()
+        para_val_loader = pl.ParallelLoader(val_loader, [device]).per_device_loader(device)
 
+        val_correct = 0
+        val_total = 0
+
+        with torch.no_grad():
+            for inputs, targets in para_val_loader:
+                outputs = model(inputs)
+                _, predicted = outputs.max(1)
+                val_total += targets.size(0)
+                val_correct += predicted.eq(targets).sum().item()
+
+        total_val_correct = xm.mesh_reduce('val_correct', val_correct, lambda x: sum(x))
+        total_val_samples = xm.mesh_reduce('val_total', val_total, lambda x: sum(x))
+        
+        val_acc = 100. * total_val_correct / total_val_samples
+
+        if xr.global_ordinal() == 0:
+            print(f"Epoch {epoch} | Loss: {avg_train_loss:.4f} | Train Acc (Approx): {train_acc:.2f}% | Val Acc: {val_acc:.2f}%")
+
+            with open(log_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch, avg_train_loss, train_acc, val_acc])
+
+        scheduler.step()
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            if xr.global_ordinal() == 0:
+                print(f"new best accuracy {best_acc:.2f}%! Saving model...")
+                save_path = "mobilenet_v2_best.pt"
+                model_cpu_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                optimizer_cpu_state = {
+                        k: v.cpu() for k, v in optimizer.state_dict().items()
+                        }
+                torch.save({
+                    "model": model_cpu_state,
+                    "epoch": epoch,
+                    "optimizer": optimizer_cpu_state,
+                    "best_acc": best_acc
+                    }, save_path)
+                print(f"Saved to: {save_path}")
+
+if __name__ == "__main__":
+    if 'TPU_PROCESS_ADDRESSES' in os.environ:
+        os.environ.pop('TPU_PROCESS_ADDRESSES')
+
+    print(f"Starting TPY Training with Mixup/CutMix/Smoothing...")
+    flags = []
+    xmp.spawn(_mp_fn, args=(flags,), n_procs=None, start_method='fork')
 
