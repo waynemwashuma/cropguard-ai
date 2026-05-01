@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch._C import device
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets
 from torchvision.datasets.sbd import shutil
 from torchvision.transforms import v2 as transforms
@@ -32,6 +32,8 @@ PROB_CUTMIX = 0.4
 
 # Label smoothing for generalization
 LABEL_SMOOTHING = 0.1
+
+TRAIN_SIZE = 0.8 # Use 80% of the images for training.
 
 def make_subset():
     """Separates out Corn images from the rest of the images.
@@ -173,6 +175,23 @@ def mixup_cutmix_data(x, y, alpha_mix=0.4, alpha_cut=1.0):
 
     else:
         return x, y, y, 1.0, 'none'
+
+class TransformedDataset(Dataset):
+    def __init__(self, subset, transform=None) -> None:
+        super().__init__()
+
+        self.subset = subset
+        self.transform = transform
+
+    def __getitem__(self, index):
+        x, y = self.subset[index]
+
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+    
+    def __len__(self):
+        return len(self.subset)
 
 
 
