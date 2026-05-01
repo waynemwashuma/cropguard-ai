@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch._C import device
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -11,6 +12,7 @@ import math
 from tqdm import tqdm
 from glob import glob
 import os
+import numpy as np
 
 DATA_DIR = "/kaggle/input/datasets/abdallahalidev/plantvillage-dataset/color"
 IMAGE_SUBSET = "Corn*/*"
@@ -25,7 +27,7 @@ NUM_WORKERS = os.cpu_count()
 # AUGMENTATION HPARAMS
 MIXUP_ALPHA = 0.4
 CUTMIX_ALPHA = 1.0
-PROB_MIX_ALPHA = 0.4
+PROB_MIXUP = 0.4
 PROB_CUTMIX = 0.4
 
 # Label smoothing for generalization
@@ -102,7 +104,7 @@ def rand_bbox(size, lam):
     """
     W = size[2]
     H = size[3]
-    cut_rat = np.sqrt(1. - lamb) # Cut ratio
+    cut_rat = np.sqrt(1. - lam) # Cut ratio
     cut_w = int(W * cut_rat)
     cut_h = int(H * cut_rat)
 
@@ -117,5 +119,60 @@ def rand_bbox(size, lam):
     bby2 = np.clip(cy + cut_h // 2, 0, H)
 
     return bbx1, bby1, bbx2, bby2
+
+def mixup_cutmix_data(x, y, alpha_mix=0.4, alpha_cut=1.0):
+    """
+    TPU-optimized MixUp/CutMix with explicit int32 casting to fix X64 RNG errors.
+    """
+    p = np.random.rand()
+    batch_size, channels, h, w = x.shape
+    device = x.device
+
+    if p < PROB_MIXUP:
+        lam = float(np.random.beta(alpha_mix, alpha_mix))
+
+        index = torch.randperm(batch_size, device=device, dtype=torch.int32)
+
+        mixed_x = lam * x + (1 - lam) * x[index, :]
+        y_a, y_b = y, y[index]
+
+        return mixed_x, y_a, y_b, lam, "mixup"
+
+    elif p < (PROB_MIXUP + PROB_CUTMIX):
+        lam = float(np.random.beta(alpha_cut, alpha_cut))
+
+        index = torch.randperm(batch_size, device=device, dtype=torch.int32)
+
+        y_a, y_b = y, y[index]
+
+        cut_rat = np.sqrt(1. - lam) # Cut ratio
+        cut_w = int(w * cut_rat)
+        cut_h = int(h * cut_rat)
+
+        # random center
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+
+        bbx1 = np.clip(cx - cut_w // 2, 0, w)
+        bby1 = np.clip(cy - cut_h // 2, 0, h)
+
+        bbx2 = np.clip(cx + cut_w // 2, 0, w)
+        bby2 = np.clip(cy + cut_h // 2, 0, h)
+
+        mask_np = np.ones((h, w), dtype=np.float32)
+        mask_np[bby1:bby2, bbx1:bbx2] = 0.0
+
+        mask = torch.from_numpy(mask_np).to(device)
+        mask = mask.view(1, 1, h, w)
+
+        mixed_x = x * mask + x[index] * (1 - mask)
+
+        lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (w * h))
+
+        return mixed_x, y_a, y_b, lam, 'cutmix'
+
+    else:
+        return x, y, y, 1.0, 'none'
+
 
 
