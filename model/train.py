@@ -14,6 +14,16 @@ from glob import glob
 import os
 import numpy as np
 
+
+from torch.utils import random_split
+from torch.utils.data.distributed import DistributedSampler
+import torch_xla
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.xla_multiprocessing as xmp
+import torch_xla.distributed.parallel_loader as pl
+import torch_xla.runtime as xr
+
+
 DATA_DIR = "/kaggle/input/datasets/abdallahalidev/plantvillage-dataset/color"
 IMAGE_SUBSET = "Corn*/*"
 MAIZE_DIR = "Maize"
