@@ -16,12 +16,49 @@ import numpy as np
 from torch.utils.data import random_split
 from torch.utils.data.distributed import DistributedSampler
 
+# DDP code to train on 2 GPUs
+from torch.distributed import init_process_group, destroy_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
+
+# Set up DDP
+# torchrun command sets the env variables RANK, LOCAL_RANK, and WORLD_SIZE
+ddp = int(os.environ.get('RANK', -1)) != -1 # Is this a DDP run?
+
+if ddp:
+    assert torch.cuda.is_available(), "CUDA needed for DDP"
+    init_process_group(backend='nccl')
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    ddp_world_size = int(os.environ['WORLD_SIZE'])
+    device = f'cuda: {ddp_local_rank}'
+    torch.cuda.set_device(device)
+
+    master_process = ddp_rank == 0
+
+else:
+    # Vanilla, non-DDP run
+    ddp_rank = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    master_process = True
+
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'
+
+device_type = 'cuda' if device.startswith('cuda') else 'cpu'
+
+torch.manual_seed(1337)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(1337)
+
 
 DATA_DIR = "/kaggle/input/datasets/abdallahalidev/plantvillage-dataset/color"
 IMAGE_SUBSET = "Corn*/*"
 MAIZE_DIR = "Maize"
 CORN_IMAGES = glob(os.path.sep.join([DATA_DIR, IMAGE_SUBSET]))
-IMAGE_SIZE = 224
+IMG_SIZE = 224
 EPOCHS = 50
 LEARNING_RATE = 3e-4
 BATCH_SIZE = 64
