@@ -26,7 +26,7 @@ DATA_DIR = "/kaggle/input/datasets/abdallahalidev/plantvillage-dataset/color"
 IMAGE_SUBSET = "Corn*/*"
 MAIZE_DIR = "Maize"
 CORN_IMAGES = glob(os.path.sep.join([DATA_DIR, IMAGE_SUBSET]))
-IMAGE_SIZE = 224
+IMG_SIZE = 224
 EPOCHS = 50
 LEARNING_RATE = 3e-4 * 8
 BATCH_SIZE = 64
@@ -135,7 +135,7 @@ def mixup_cutmix_data(x, y, alpha_mix=0.4, alpha_cut=1.0):
     TPU-optimized MixUp/CutMix with explicit int32 casting to fix X64 RNG errors.
     """
     p = np.random.rand()
-    batch_size, channels, h, w = x.shape
+    batch_size, _, h, w = x.shape
     device = x.device
 
     if p < PROB_MIXUP:
@@ -160,8 +160,8 @@ def mixup_cutmix_data(x, y, alpha_mix=0.4, alpha_cut=1.0):
         cut_h = int(h * cut_rat)
 
         # random center
-        cx = np.random.randint(W)
-        cy = np.random.randint(H)
+        cx = np.random.randint(w)
+        cy = np.random.randint(h)
 
         bbx1 = np.clip(cx - cut_w // 2, 0, w)
         bby1 = np.clip(cy - cut_h // 2, 0, h)
