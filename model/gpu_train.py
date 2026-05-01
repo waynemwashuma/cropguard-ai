@@ -167,7 +167,7 @@ def mixup_cutmix_data(x, y, alpha_mix=0.4, alpha_cut=1.0):
     TPU-optimized MixUp/CutMix with explicit int32 casting to fix X64 RNG errors.
     """
     p = np.random.rand()
-    batch_size, channels, h, w = x.shape
+    batch_size, _, h, w = x.shape
     device = x.device
 
     if p < PROB_MIXUP:
@@ -234,10 +234,9 @@ class TransformedDataset(Dataset):
         return len(self.subset)
 
 
-def _mp_fn(rank, flags):
-    device = torch_xla.device()
+def trainer():
 
-    if xr.global_ordinal() == 0:
+    if master_process == 0:
         print("[INFO] Loading datasets...")
 
     full_dataset = datasets.ImageFolder(root=MAIZE_DIR)
@@ -249,8 +248,8 @@ def _mp_fn(rank, flags):
     train_dataset =  TransformedDataset(train_split, train_transform)
     val_dataset = TransformedDataset(val_split, val_transform)
 
-    train_sampler = DistributedSampler(train_dataset, num_replicas=xr.world_size(), rank=xr.global_ordinal(), shuffle=True)
-    val_sampler = DistributedSampler(val_dataset, num_replicas=xr.world_size(), rank=xr.global_ordinal(), shuffle=False)
+    train_sampler = DistributedSampler(train_dataset, num_replicas=ddp_world_size, rank=ddp_local_rank, shuffle=True)
+    val_sampler = DistributedSampler(val_dataset, num_replicas=ddp_world_size, rank=ddp_local_rank, shuffle=False)
     
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, num_workers=NUM_WORKERS, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=NUM_WORKERS, drop_last=True)
@@ -262,6 +261,11 @@ def _mp_fn(rank, flags):
     # Drop the head and replace it with ours
     model.classifier[1] = fc
 
+    if ddp:
+        model = DDP(model, device_ids=[ddp_local_rank])
+
+    raw_model = model.module if ddp else model
+
     lr_scaled = LEARNING_RATE
     optimizer = AdamW(model.parameters(), lr=lr_scaled, weight_decay=0.05)
 
@@ -270,29 +274,26 @@ def _mp_fn(rank, flags):
     scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=EPOCHS)
     log_file = "training_log.csv"
 
-    if xr.global_ordinal() == 0:
+    if master_process:
         with open(log_file, mode='w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow('Epoch Train_Loss Train_Acc Val_Acc'.split())
 
     best_acc = 0.0
-    xm.rendezvous('initialization_complete')
 
     for epoch in range(1, EPOCHS + 1):
         train_sampler.set_epoch(epoch)
         model.train() # Set model to training mode
 
-        para_train_loader = pl.ParallelLoader(train_loader, [device]).per_device_loader(device)
-
         train_loss = 0.0
         correct = 0
         total = 0
 
-        if xr.global_ordinal() == 0:
-            pbar = tqdm(para_train_loader, total=len(train_loader), desc=f"Epoch {epoch}/{EPOCHS+1} [Train]")
+        if master_process:
+            pbar = tqdm(train_loader, total=len(train_loader), desc=f"Epoch {epoch}/{EPOCHS+1} [Train]")
             loader_iter = pbar
         else:
-            loader_iter = para_train_loader
+            loader_iter = train_loader
 
         for inputs, targets in loader_iter:
             # clear gradients
@@ -306,8 +307,7 @@ def _mp_fn(rank, flags):
 
             loss.backward()
 
-            # TPU style optimizer step
-            xm.optimizer_step(optimizer)
+            optimizer.step()
 
             with torch.no_grad():
                 train_loss += loss.item()
@@ -316,37 +316,37 @@ def _mp_fn(rank, flags):
                 total += targets.size(0)
                 correct += predicted.eq(target_dominant).sum().item()
 
-                if xr.global_ordinal() == 0:
+                if master_process:
                     pbar.set_postfix(loss=f"{loss.item():.4f}", type=aug_type)
         
         # Collect and sum all the train losses from each worker
-        total_train_loss = xm.mesh_reduce('train_loss', train_loss, lambda x: sum(x))
-        total_correct = xm.mesh_reduce('train_correct', correct, lambda x: sum(x))
-        total_samples = xm.mesh_reduce('train_total', total, lambda x: sum(x))
+        if ddp:
+            dist.all_reduce(train_loss, op= dist.ReduceOp.SUM)
+            dist.all_reduce(correct, op=dist.ReduceOp.SUM)
+            dist.all_reduce(total, op=dist.ReduceOp.SUM)
         
-        avg_train_loss = total_train_loss / len(train_loader) / xr.world_size()
-        train_acc = 100. * total_correct / total_samples
+        avg_train_loss = train_loss / len(train_loader) / ddp_world_size
+        train_acc = 100. * correct / total
 
         # Do evaluation after each epoch
         model.eval()
-        para_val_loader = pl.ParallelLoader(val_loader, [device]).per_device_loader(device)
 
         val_correct = 0
         val_total = 0
 
         with torch.no_grad():
-            for inputs, targets in para_val_loader:
+            for inputs, targets in val_loader:
                 outputs = model(inputs)
                 _, predicted = outputs.max(1)
                 val_total += targets.size(0)
                 val_correct += predicted.eq(targets).sum().item()
 
-        total_val_correct = xm.mesh_reduce('val_correct', val_correct, lambda x: sum(x))
-        total_val_samples = xm.mesh_reduce('val_total', val_total, lambda x: sum(x))
+        dist.all_reduce(val_correct, op=dist.ReduceOp.SUM)
+        dist.all_reduce(val_total, op=dist.ReduceOp.SUM)
         
-        val_acc = 100. * total_val_correct / total_val_samples
+        val_acc = 100. * val_correct / val_total
 
-        if xr.global_ordinal() == 0:
+        if master_process:
             print(f"Epoch {epoch} | Loss: {avg_train_loss:.4f} | Train Acc (Approx): {train_acc:.2f}% | Val Acc: {val_acc:.2f}%")
 
             with open(log_file, mode='a', newline='') as f:
@@ -357,10 +357,10 @@ def _mp_fn(rank, flags):
 
         if val_acc > best_acc:
             best_acc = val_acc
-            if xr.global_ordinal() == 0:
+            if master_process:
                 print(f"new best accuracy {best_acc:.2f}%! Saving model...")
                 save_path = "mobilenet_v2_best.pt"
-                model_cpu_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                model_cpu_state = {k: v.cpu() for k, v in raw_model.state_dict().items()}
                 optimizer_cpu_state = {
                         k: v.cpu() for k, v in optimizer.state_dict().items()
                         }
@@ -373,10 +373,8 @@ def _mp_fn(rank, flags):
                 print(f"Saved to: {save_path}")
 
 if __name__ == "__main__":
-    if 'TPU_PROCESS_ADDRESSES' in os.environ:
-        os.environ.pop('TPU_PROCESS_ADDRESSES')
+    trainer()
 
-    print(f"Starting TPY Training with Mixup/CutMix/Smoothing...")
-    flags = []
-    xmp.spawn(_mp_fn, args=(flags,), n_procs=None, start_method='fork')
+    if ddp:
+        destroy_process_group()
 
