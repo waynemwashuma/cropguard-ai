@@ -1,21 +1,19 @@
 import torch
 from torch import nn
-from torch._C import device
-from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets
+import torchvision
 from torchvision.datasets.sbd import shutil
 from torchvision.transforms import v2 as transforms
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-import math
 from tqdm import tqdm
 from glob import glob
-import os
+import os, csv
 import numpy as np
 
 
-from torch.utils import random_split
+from torch.utils.data import random_split
 from torch.utils.data.distributed import DistributedSampler
 import torch_xla
 import torch_xla.core.xla_model as xm
@@ -202,6 +200,59 @@ class TransformedDataset(Dataset):
     
     def __len__(self):
         return len(self.subset)
+
+
+def _mp_fn(rank, flags):
+    device = torch_xla.device()
+
+    if xr.global_ordinal() == 0:
+        print("[INFO] Loading datasets...")
+
+    full_dataset = datasets.ImageFolder(root=MAIZE_DIR)
+    train_size = int(TRAIN_SIZE * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+
+    train_split, val_split = random_split(full_dataset, [train_size, val_size])
+
+    train_dataset =  TransformedDataset(train_split, train_transform)
+    val_dataset = TransformedDataset(val_split, val_transform)
+
+    train_sampler = DistributedSampler(train_dataset, num_replicas=xr.world_size(), rank=xr.global_ordinal(), shuffle=True)
+    val_sampler = DistributedSampler(val_dataset, num_replicas=xr.world_size(), rank=xr.global_ordinal(), shuffle=False)
+    
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, num_workers=NUM_WORKERS, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=NUM_WORKERS, drop_last=True)
+
+    model = torchvision.models.mobilenet_v2()
+
+    fc = nn.Linear(in_features=1280, out_features=4)
+    
+    # Drop the head and replace it with ours
+    model.classifier[1] = fc
+
+    lr_scaled = LEARNING_RATE
+    optimizer = AdamW(model.parameters(), lr=lr_scaled, weight_decay=0.05)
+
+    criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+
+    scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=EPOCHS)
+    log_file = "training_log.csv"
+
+    if xr.global_ordinal() == 0:
+        with open(log_file, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow('Epoch Train_Loss Train_Acc Val_Acc'.split())
+
+    best_acc = 0.0
+    xm.rendezvous('initialization_complete')
+
+    for epoch in tqdm(range(1, EPOCHS + 1), desc="Training"):
+        train_sampler.set_epoch(epoch)
+        model.train() # Set model to training mode
+
+        para_train_loader = pl.ParallelLoader(train_loader, [device]).per_device_loader(device)
+
+        
 
 
 
