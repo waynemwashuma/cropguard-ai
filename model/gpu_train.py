@@ -245,8 +245,10 @@ class TransformedDataset(Dataset):
 
 def trainer():
 
-    if master_process == 0:
+    if master_process:
         print("[INFO] Loading datasets...")
+        print(f"[INFO] Using {NUM_WORKERS} CPU cores!")
+        print(f"[INFO] Using device: {device} Is DDP run: {ddp} World Size: {ddp_world_size}")
 
     full_dataset = datasets.ImageFolder(root=MAIZE_DIR)
     train_size = int(TRAIN_SIZE * len(full_dataset))
@@ -269,6 +271,8 @@ def trainer():
     
     # Drop the head and replace it with ours
     model.classifier[1] = fc
+
+    model.to(device)
 
     if ddp:
         model = DDP(model, device_ids=[ddp_local_rank])
@@ -307,6 +311,9 @@ def trainer():
         for inputs, targets in loader_iter:
             # clear gradients
             optimizer.zero_grad()
+
+            # Push inputs to the device
+            inputs, targets = inputs.to(device), targets.to(device)
 
             inputs, targets_a, targets_b, lam, aug_type = mixup_cutmix_data(inputs, targets) # use default params
 
