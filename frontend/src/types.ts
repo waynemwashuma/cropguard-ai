@@ -10,6 +10,16 @@ export interface DiagnosisResult {
   severity: SeverityKey;
 }
 
+export type DiagnosisResponse =
+  | {
+      diagnosis: DiagnosisResult;
+      error: null;
+    }
+  | {
+      diagnosis: null;
+      error: string;
+    };
+
 export interface HistoryEntry extends DiagnosisResult {
   previewUrl: string;
   timestamp: string;

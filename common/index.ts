@@ -1,2 +1,2 @@
-export * from './diseases'
-export * from './output'
+export * from './diseases.ts'
+export * from './output.ts'

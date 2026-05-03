@@ -1,4 +1,4 @@
-import { useState, useRef, DragEvent, ChangeEvent } from 'react';
+import { useState, useRef, type DragEvent, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { diagnoseLeaf } from '../api';
 import type { DiagnosisResult } from '../types';
@@ -42,9 +42,15 @@ export default function Upload({ onResult, loading, setLoading }: UploadProps) {
   async function handleSubmit(): Promise<void> {
     if (!file) { setError(t('uploadError')); return; }
     setLoading(true);
+    setError('');
     try {
       const res = await diagnoseLeaf(file);
-      onResult(res, preview ?? '');
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+
+      onResult(res.diagnosis, preview ?? '');
     } catch {
       setError('Diagnosis failed. Please try again.');
     } finally {
