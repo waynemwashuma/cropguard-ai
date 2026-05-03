@@ -122,8 +122,16 @@ def get_dataset_stats(data_dir):
 
     return first_moment.tolist(), torch.sqrt(second_moment.square()).tolist()
 
-MEAN, STD = get_dataset_stats(MAIZE_DIR)
-print(f"Mean: {MEAN} | STD: {STD}")
+#MEAN, STD = get_dataset_stats(MAIZE_DIR)
+MEAN = [0.43762004375457764,
+        0.4983558654785156,
+        0.787480592727661
+        ]
+STD  = [0.43693873286247253,
+        0.49755582213401794,
+        0.37814345955848694
+        ]
+#print(f"Mean: {MEAN} | STD: {STD}")
 
 train_transform = transforms.Compose([
     transforms.ToImage(),
