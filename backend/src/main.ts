@@ -4,7 +4,7 @@ import { InferenceSession, Tensor } from "onnxruntime-node";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
-import type { Inference } from "../../common/index.ts";
+import type { Inference, Severity } from "../../common/index.ts";
 
 const app = express();
 const upload = multer();
@@ -18,6 +18,16 @@ const CLASS_DISEASES = [
   "healthy",
   "blight",
 ] as const;
+const NORMALIZATION_MEAN = [
+  0.43762004375457764,
+  0.4983558654785156,
+  0.787480592727661,
+] as const;
+const NORMALIZATION_STD = [
+  0.43693873286247253,
+  0.49755582213401794,
+  0.37814345955848694,
+] as const;
 
 let session: InferenceSession | null = null;
 
@@ -26,6 +36,22 @@ function softmax(scores: number[]) {
   const exps = scores.map((score) => Math.exp(score - maxScore));
   const sum = exps.reduce((total, value) => total + value, 0);
   return exps.map((value) => value / sum);
+}
+
+function getSeverity(disease: Inference["output"], confidence: number): Severity {
+  if (disease === "healthy") {
+    return "low";
+  }
+
+  if (confidence >= 0.9) {
+    return "high";
+  }
+
+  if (confidence >= 0.75) {
+    return "medium";
+  }
+
+  return "low";
 }
 
 function decodePrediction(output: ArrayLike<number>) {
@@ -38,13 +64,13 @@ function decodePrediction(output: ArrayLike<number>) {
       topIndex = index;
     }
   }
-
+  
   const disease = CLASS_DISEASES[topIndex] ?? "healthy";
 
   return {
     disease,
     confidence: probabilities[topIndex] ?? 0,
-    scores,
+    severity: getSeverity(disease, probabilities[topIndex] ?? 0),
   };
 }
 
@@ -61,16 +87,22 @@ async function preprocessImage(buffer: Buffer) {
   const image = await sharp(buffer)
     .resize(224, 224)
     .removeAlpha()
-    .toColourspace("rgb")
+    .toColourspace("srgb")
     .raw()
     .toBuffer();
 
   const floatData = new Float32Array(1 * 3 * 224 * 224);
 
   for (let i = 0; i < 224 * 224; i++) {
-    floatData[i] = image[i * 3] / 255.0;
-    floatData[i + 224 * 224] = image[i * 3 + 1] / 255.0;
-    floatData[i + 2 * 224 * 224] = image[i * 3 + 2] / 255.0;
+    const red = image[i * 3] / 255.0;
+    const green = image[i * 3 + 1] / 255.0;
+    const blue = image[i * 3 + 2] / 255.0;
+
+    floatData[i] = (red - NORMALIZATION_MEAN[0]) / NORMALIZATION_STD[0];
+    floatData[i + 224 * 224] =
+      (green - NORMALIZATION_MEAN[1]) / NORMALIZATION_STD[1];
+    floatData[i + 2 * 224 * 224] =
+      (blue - NORMALIZATION_MEAN[2]) / NORMALIZATION_STD[2];
   }
 
   return new Tensor("float32", floatData, [1, 3, 224, 224]);
@@ -113,6 +145,8 @@ async function handleInference(req: express.Request, res: express.Response) {
     const prediction = decodePrediction(output);
     const response: Inference = {
       output: prediction.disease,
+      confidence: Number(prediction.confidence.toFixed(4)),
+      severity: prediction.severity,
     };
 
     res.json(response);
