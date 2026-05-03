@@ -99,7 +99,8 @@ def get_dataset_stats(data_dir):
 
     dataset = datasets.ImageFolder(root=data_dir,
                                    transform=transforms.Compose([
-                                       transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+                                       transforms.Resize((IMG_SIZE, IMG_SIZE)),
+                                       transforms.ToImage(),
                                        transforms.ToDtype(torch.float32, scale=True)
                                        ]))
 
