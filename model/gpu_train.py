@@ -87,7 +87,7 @@ Corn images will be moved to their own directory and used for training.
     for img_path in tqdm(CORN_IMAGES, desc="Separating Corn images"):
         for class_ in classes:
             if class_.lower() in img_path.lower():
-                shutil.copy2(img_path, f"Maize/{class_}/{img_path}")
+                shutil.copy2(img_path, f"Maize/{class_}/{count}.jpg")
                 count += 1
 
     print(f"Successfully moved {count} images from Corn* to Maize directories.")
