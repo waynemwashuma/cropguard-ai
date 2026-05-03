@@ -337,9 +337,20 @@ def trainer():
         
         # Collect and sum all the train losses from each worker
         if ddp:
-            dist.all_reduce(train_loss, op= dist.ReduceOp.SUM)
-            dist.all_reduce(correct, op=dist.ReduceOp.SUM)
-            dist.all_reduce(total, op=dist.ReduceOp.SUM)
+            # Convert to tensors of NCCL backend reduction
+            loss_t = torch.tensor(train_loss, device=device)
+            correct_t = torch.tensor(correct, device=device)
+            total_t = torch.tensor(total, device=device)
+
+
+            dist.all_reduce(loss_t, op= dist.ReduceOp.SUM)
+            dist.all_reduce(correct_t, op=dist.ReduceOp.SUM)
+            dist.all_reduce(total_t, op=dist.ReduceOp.SUM)
+
+            # Extract the values back out
+            train_loss = loss_t.item()
+            correct = correct_t.item()
+            total = total_t.item()
         
         avg_train_loss = train_loss / len(train_loader) / ddp_world_size
         train_acc = 100. * correct / total
@@ -352,14 +363,22 @@ def trainer():
 
         with torch.no_grad():
             for inputs, targets in val_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
                 _, predicted = outputs.max(1)
                 val_total += targets.size(0)
                 val_correct += predicted.eq(targets).sum().item()
 
-        dist.all_reduce(val_correct, op=dist.ReduceOp.SUM)
-        dist.all_reduce(val_total, op=dist.ReduceOp.SUM)
-        
+        if ddp:
+            correct_t = torch.tensor(val_correct, device=device)
+            total_t = torch.tensor(val_total, device=device)
+
+            dist.all_reduce(correct_t, op=dist.ReduceOp.SUM)
+            dist.all_reduce(total_t, op=dist.ReduceOp.SUM)
+
+            val_correct = correct_t.item()
+            val_total = total_t.item()
+
         val_acc = 100. * val_correct / val_total
 
         if master_process:
@@ -377,13 +396,9 @@ def trainer():
                 print(f"new best accuracy {best_acc:.2f}%! Saving model...")
                 save_path = "mobilenet_v2_best.pt"
                 model_cpu_state = {k: v.cpu() for k, v in raw_model.state_dict().items()}
-                optimizer_cpu_state = {
-                        k: v.cpu() for k, v in optimizer.state_dict().items()
-                        }
                 torch.save({
                     "model": model_cpu_state,
                     "epoch": epoch,
-                    "optimizer": optimizer_cpu_state,
                     "best_acc": best_acc
                     }, save_path)
                 print(f"Saved to: {save_path}")
