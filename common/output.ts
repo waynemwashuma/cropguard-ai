@@ -1,4 +1,4 @@
-import { Disease } from "./diseases"
+import { Disease } from "./diseases.ts"
 
 export type Inference = {
     output: Disease

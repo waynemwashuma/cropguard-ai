@@ -1,19 +1,14 @@
-export enum Disease {
-    Healthy,
-    GreyLeaf,
-    Rust,
-    Blight
-}
+export type Disease = "healthy" | "greyLeaf" | "rust" | "blight"
 
 export function getDiseaseName(disease: Disease) {
     switch (disease) {
-        case Disease.Healthy:
+        case "healthy":
             return "healthy"
-        case Disease.Rust:
+        case "rust":
             return "common rust"
-        case Disease.GreyLeaf:
+        case "greyLeaf":
             return "greyleaf spot"
-        case Disease.Blight:
+        case "blight":
             return "northern leafblight"
         default:
          throw new Error("Undefined disease detected")
@@ -21,15 +16,15 @@ export function getDiseaseName(disease: Disease) {
 }
 
 // TODO: Sync this with the pdf information
-export function getDiseaseTreatment(disease:Disease){
+export function getDiseaseTreatment(disease: Disease) {
          switch (disease) {
-        case Disease.Healthy:
+        case "healthy":
             return "healthy"
-        case Disease.Rust:
+        case "rust":
             return "healthy"
-        case Disease.GreyLeaf:
+        case "greyLeaf":
             return "healthy"
-        case Disease.Blight:
+        case "blight":
             return "healthy"
         default:
          throw new Error("Undefined disease detected")
