@@ -60,7 +60,7 @@ MAIZE_DIR = "Maize"
 CORN_IMAGES = glob(os.path.sep.join([DATA_DIR, IMAGE_SUBSET]))
 IMG_SIZE = 224
 EPOCHS = 50
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 3e-4
 BATCH_SIZE = 64
 NUM_WORKERS = os.cpu_count()
 
@@ -73,7 +73,7 @@ PROB_CUTMIX = 0.4
 # Label smoothing for generalization
 LABEL_SMOOTHING = 0.1
 
-TRAIN_SIZE = 0.8 # Use 80% of the images for training.
+TRAIN_SIZE = 0.95 # Use 80% of the images for training.
 
 def make_subset():
     """Separates out Corn images from the rest of the images.
@@ -254,6 +254,20 @@ def trainer():
     train_size = int(TRAIN_SIZE * len(full_dataset))
     val_size = len(full_dataset) - train_size
 
+    # Calculate class weights
+    # Get the count of each class directly from the ImageFolder targets
+    class_counts = np.bincount(full_dataset.targets)
+    total_samples = len(full_dataset.targets)
+    num_classes = len(full_dataset.classes) # 4
+
+    # Calculate the inverse frequence weights
+    weights = total_samples / (num_classes * class_counts)
+    class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
+
+    if master_process:
+        print(f"[INFO] Cass counts: {class_counts}")
+        print(f"[INFO] Applied Class Weights: {class_weights.cpu().numpy()}")
+
     train_split, val_split = random_split(full_dataset, [train_size, val_size])
 
     train_dataset =  TransformedDataset(train_split, train_transform)
@@ -282,7 +296,7 @@ def trainer():
     lr_scaled = LEARNING_RATE
     optimizer = AdamW(model.parameters(), lr=lr_scaled, weight_decay=0.05)
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+    criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING, weight=class_weights)
 
     scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=EPOCHS)
     log_file = "training_log.csv"
