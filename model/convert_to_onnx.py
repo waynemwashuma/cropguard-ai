@@ -7,7 +7,7 @@ import os
 
 MODEL_PATH = "mobilenet_v2_best.pt"
 ONNX_PATH = "model.onnx"
-QUANTIZED_PATH = "food101_final_int8.onnx"
+QUANTIZED_PATH = "model_int8.onnx"
 
 print(f"Loading checkpoint...")
 device = torch.device('cpu')
