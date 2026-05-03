@@ -79,7 +79,7 @@ def make_subset():
     """Separates out Corn images from the rest of the images.
 Corn images will be moved to their own directory and used for training.
     """
-    classes = "Healthy Nothern_Leaf_Blight Common_Rust Gray_Leaf_Spot".split(" ")
+    classes = "Healthy Northern_Leaf_Blight Common_Rust Gray_Leaf_Spot".split(" ")
     for dir_ in classes:
         os.makedirs(f"Maize/{dir_}", exist_ok=True)
 
