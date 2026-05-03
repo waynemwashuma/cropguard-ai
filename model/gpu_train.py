@@ -60,7 +60,7 @@ MAIZE_DIR = "Maize"
 CORN_IMAGES = glob(os.path.sep.join([DATA_DIR, IMAGE_SUBSET]))
 IMG_SIZE = 224
 EPOCHS = 50
-LEARNING_RATE = 3e-4
+LEARNING_RATE = 1e-4
 BATCH_SIZE = 64
 NUM_WORKERS = os.cpu_count()
 
