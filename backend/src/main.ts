@@ -142,7 +142,7 @@ async function handleInference(req: express.Request, res: express.Response) {
       throw new Error(`Missing output tensor: ${outputName}`);
     }
 
-    const prediction = decodePrediction(output);
+    const prediction = decodePrediction(output as ArrayLike<number>);
     const response: Inference = {
       output: prediction.disease,
       confidence: Number(prediction.confidence.toFixed(4)),
