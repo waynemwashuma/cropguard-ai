@@ -1,85 +1,146 @@
-import './i18n';
-import { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import Header from './components/Header';
-import Upload from './components/Upload';
-import Result from './components/Result';
-import History from './components/History';
-import type { DiagnosisResult, HistoryEntry, LangKey } from './types';
-import './App.css';
+import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
+import Header from "./components/Header";
+import Upload from "./components/Upload";
+import Result from "./components/Result";
+import History from "./components/History";
+import VideoPlayer from "./components/VideoPlayer";
+import DashboardFooter from "./components/DashboardFooter";
+import Footer from "./components/FooterCard"; // Ensure the filename matches
+import { diagnoseLeaf } from "./api";
+import type { DiagnosisResult, HistoryEntry } from "./types";
+import "./App.css";
+import "./footer.css";
 
-const HISTORY_KEY = 'cg_history';
 
-function loadHistory(): HistoryEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]') as HistoryEntry[];
-  } catch {
-    return [];
-  }
-}
+const VIDEO_MAP: Record<string, { url: string; title: string }> = {
+  local: { url: "/crop.mp4", title: "Plant Disease Management" },
+  cercospora: { url: "/cercospora.mp4", title: "Grey Leaf Spot Prevention" },
+  rust: { url: "/rust.mp4", title: "Rust Prevention" },
+  blight: { url: "/blight.mp4", title: "Blight Prevention" },
+};
 
-export default function App() {
+const App: React.FC = () => {
   const { i18n } = useTranslation();
-  const [lang, setLang] = useState<LangKey>('en');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DiagnosisResult | null>(null);
-  const [preview, setPreview] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
+  const [uploadedImg, setUploadedImg] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  useEffect(() => { void i18n.changeLanguage(lang); }, [lang, i18n]);
-  useEffect(() => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  }, [history]);
+  const videoEntries = Object.entries(VIDEO_MAP);
+  const [selectedVideoKey, setSelectedVideoKey] = useState(videoEntries[0][0]);
+  const selectedVideo = VIDEO_MAP[selectedVideoKey];
 
-  function handleResult(res: DiagnosisResult, previewUrl: string): void {
-    setResult(res);
-    setPreview(previewUrl);
-    setHistory((prev) => [
-      { ...res, previewUrl, timestamp: new Date().toISOString() },
-      ...prev.slice(0, 19),
-    ]);
-  }
-
-  function handleReset(): void {
+  const handleUpload = (file: File) => {
+    setLoading(true);
+    setError(null);
     setResult(null);
-    setPreview('');
-  }
 
-  function handleHistorySelect(item: HistoryEntry): void {
-    setResult(item);
-    setPreview(item.previewUrl);
-  }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const previewUrl = e.target?.result as string;
+      setUploadedImg(previewUrl);
+
+      try {
+        const res = await diagnoseLeaf(file);
+        setLoading(false);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        if (res.diagnosis) {
+          setResult(res.diagnosis);
+          setHistory([
+            {
+              ...res.diagnosis,
+              timestamp: new Date().toISOString(),
+              previewUrl: previewUrl,
+            },
+            ...history,
+          ]);
+        }
+      } catch (err) {
+        setLoading(false);
+        setError("Unexpected error, please try again.");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleHistorySelect = (entry: HistoryEntry) => {
+    setResult(entry);
+    setUploadedImg(entry.previewUrl ?? null);
+  };
+
+  const handleLangChange = (lang: string) => {
+    i18n.changeLanguage(lang);
+  };
 
   return (
-    <div className="app">
-      <div className="bg-grain" aria-hidden="true" />
-      <div className="bg-mesh"  aria-hidden="true" />
+    <div className="app-container">
+      <Header onLangChange={handleLangChange} currentLang={i18n.language} />
 
-      <Header lang={lang} setLang={setLang} />
+      <div className="dashboard-row">
+        <Upload onUpload={handleUpload} loading={loading} error={error} />
 
-      <main className="main">
-        {result === null ? (
-          <Upload
-            onResult={handleResult}
-            loading={loading}
-            setLoading={setLoading}
-          />
-        ) : (
-          <Result result={result} preview={preview} onReset={handleReset} />
-        )}
+        <Result
+          result={
+            result ?? {
+              disease: "healthy",
+              confidence: 0,
+              severity: "low",
+            }
+          }
+          imageUrl={uploadedImg ?? undefined}
+          onBack={() => {
+            setResult(null);
+            setUploadedImg(null);
+          }}
+        />
 
         <History
           history={history}
-          setHistory={setHistory}
           onSelect={handleHistorySelect}
+          onClear={() => setHistory([])}
         />
-      </main>
 
-      <footer className="app-footer">
-        <span>🌾 CropGuard AI</span>
-        <span className="footer-sep">·</span>
-        <span>Multimedia University of Kenya</span>
-      </footer>
+        <div>
+          <h3 style={{ marginLeft: "16px", marginBottom: 12 }}>
+            {i18n.t("educationalVideos")}
+          </h3>
+          <select
+            value={selectedVideoKey}
+            onChange={(e) => setSelectedVideoKey(e.target.value)}
+            style={{
+              margin: "0 0 18px 16px",
+              padding: "7px 12px",
+              borderRadius: "8px",
+              border: "1px solid #ccc",
+              fontSize: "1rem",
+              display: "block",
+            }}
+          >
+            {videoEntries.map(([key, video]) => (
+              <option key={key} value={key}>
+                {video.title}
+              </option>
+            ))}
+          </select>
+          <VideoPlayer
+            videoUrl={selectedVideo.url}
+            title={selectedVideo.title}
+          />
+        </div>
+      </div>
+
+      {/* --- DashboardFooter is now below all dashboard components --- */}
+      <DashboardFooter />
+
+      {/* Universal footer for the app */}
+      <Footer />
     </div>
   );
-}
+};
+
+export default App;

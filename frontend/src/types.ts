@@ -1,8 +1,17 @@
-// ── Shared types for CropGuard AI ────────────────────────────────
+export type DiseaseKey =
+  | 'healthy'
+  | 'cercospora'
+  | 'rust'
+  | 'blight';
 
-export type DiseaseKey = 'cercospora' | 'rust' | 'blight' | 'healthy';
 export type SeverityKey = 'low' | 'medium' | 'high';
-export type LangKey = 'en' | 'sw';
+
+export interface Disease {
+  key: DiseaseKey;
+  name: string;
+  description: string;
+  videoUrl?: string;
+}
 
 export interface DiagnosisResult {
   disease: DiseaseKey;
@@ -10,17 +19,12 @@ export interface DiagnosisResult {
   severity: SeverityKey;
 }
 
-export type DiagnosisResponse =
-  | {
-      diagnosis: DiagnosisResult;
-      error: null;
-    }
-  | {
-      diagnosis: null;
-      error: string;
-    };
+export interface DiagnosisResponse {
+  diagnosis: DiagnosisResult | null;
+  error: string | null;
+}
 
 export interface HistoryEntry extends DiagnosisResult {
-  previewUrl: string;
   timestamp: string;
+  previewUrl?: string;
 }
