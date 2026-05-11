@@ -16,7 +16,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "npm run dev",
-    "dev": "nodemon ./src/main.ts",
+    "dev": "tsx ./src/main.ts",
     "build": ""
   },
   "dependencies": {
@@ -26,10 +26,9 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.1.0",
     "@types/node": "^24.12.2",
-    "ts-node": "^10.9.2"
+    "tsx": "^4.21.0"
   }
 }
