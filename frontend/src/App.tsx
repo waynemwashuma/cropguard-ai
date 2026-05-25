@@ -1,44 +1,73 @@
-import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
-import Header from "./components/Header";
-import Upload from "./components/Upload";
-import Result from "./components/Result";
-import History from "./components/History";
-import VideoPlayer from "./components/VideoPlayer";
-import DashboardFooter from "./components/DashboardFooter";
-import Footer from "./components/FooterCard"; // Ensure the filename matches
-import { diagnoseLeaf } from "./api";
-import type { DiagnosisResult, HistoryEntry } from "./types";
-import "./App.css";
-import "./footer.css";
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import Header from './components/Header';
+import Upload from './components/Upload';
+import Result from './components/Result';
+import History from './components/History';
+import VideoSection from './components/VideoSection';
+import AppFooter from './components/AppFooter';
+import { diagnoseLeaf } from './api';
+import type { DiagnosisResult, HistoryEntry, DiseaseKey, SeverityKey } from './types';
+import './App.css';
 
-
-const VIDEO_MAP: Record<string, { url: string; title: string }> = {
-  local: { url: "/crop.mp4", title: "Plant Disease Management" },
-  cercospora: { url: "/cercospora.mp4", title: "Grey Leaf Spot Prevention" },
-  rust: { url: "/rust.mp4", title: "Rust Prevention" },
-  blight: { url: "/blight.mp4", title: "Blight Prevention" },
+// ── Simulated results for sample chips ──────────────────────────
+// When a user picks a sample we return a realistic fixed result
+// so the full result flow (treatment, video, history) still works.
+const SAMPLE_RESULTS: Record<string, DiagnosisResult> = {
+  rust: {
+    disease:    'rust'       as DiseaseKey,
+    confidence: 0.97,
+    severity:   'high'       as SeverityKey,
+  },
+  cercospora: {
+    disease:    'cercospora' as DiseaseKey,
+    confidence: 0.91,
+    severity:   'medium'     as SeverityKey,
+  },
+  blight: {
+    disease:    'blight'     as DiseaseKey,
+    confidence: 0.94,
+    severity:   'high'       as SeverityKey,
+  },
+  healthy: {
+    disease:    'healthy'    as DiseaseKey,
+    confidence: 0.99,
+    severity:   'low'        as SeverityKey,
+  },
 };
 
 const App: React.FC = () => {
-  const { i18n } = useTranslation();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<DiagnosisResult | null>(null);
-  const [uploadedImg, setUploadedImg] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const { i18n, t } = useTranslation();
+  const [loading, setLoading]               = useState(false);
+  const [error, setError]                   = useState<string | null>(null);
+  const [result, setResult]                 = useState<DiagnosisResult | null>(null);
+  const [uploadedImg, setUploadedImg]       = useState<string | null>(null);
+  const [history, setHistory]               = useState<HistoryEntry[]>([]);
+  const [selectedVideoKey, setSelectedVideoKey] = useState('default');
 
-  const videoEntries = Object.entries(VIDEO_MAP);
-  const [selectedVideoKey, setSelectedVideoKey] = useState(videoEntries[0][0]);
-  const selectedVideo = VIDEO_MAP[selectedVideoKey];
+  // ── Helper: commit a diagnosis to state + history ──
+  const commitResult = (diagnosis: DiagnosisResult, previewUrl: string | null) => {
+    setResult(diagnosis);
+    setSelectedVideoKey(diagnosis.disease);
+    setHistory(prev => [
+      {
+        ...diagnosis,
+        timestamp:  new Date().toISOString(),
+        previewUrl: previewUrl ?? undefined,
+      },
+      ...prev,
+    ]);
+  };
 
+  // ── Real image upload → Express /infer ──
   const handleUpload = (file: File) => {
     setLoading(true);
     setError(null);
     setResult(null);
+    setUploadedImg(null);
 
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = async e => {
       const previewUrl = e.target?.result as string;
       setUploadedImg(previewUrl);
 
@@ -50,27 +79,29 @@ const App: React.FC = () => {
           return;
         }
         if (res.diagnosis) {
-          setResult(res.diagnosis);
-          setHistory([
-            {
-              ...res.diagnosis,
-              timestamp: new Date().toISOString(),
-              previewUrl: previewUrl,
-            },
-            ...history,
-          ]);
+          commitResult(res.diagnosis, previewUrl);
         }
-      } catch (err) {
+      } catch {
         setLoading(false);
-        setError("Unexpected error, please try again.");
+        setError('Unexpected error — make sure the backend is running.');
       }
     };
     reader.readAsDataURL(file);
   };
 
+  // ── Sample chip → simulated result (no API call) ──
+  const handleSample = (diseaseKey: string) => {
+    const diagnosis = SAMPLE_RESULTS[diseaseKey];
+    if (!diagnosis) return;
+    setError(null);
+    setUploadedImg(null);   // no real image for samples
+    commitResult(diagnosis, null);
+  };
+
   const handleHistorySelect = (entry: HistoryEntry) => {
     setResult(entry);
     setUploadedImg(entry.previewUrl ?? null);
+    setSelectedVideoKey(entry.disease);
   };
 
   const handleLangChange = (lang: string) => {
@@ -81,64 +112,49 @@ const App: React.FC = () => {
     <div className="app-container">
       <Header onLangChange={handleLangChange} currentLang={i18n.language} />
 
-      <div className="dashboard-row">
-        <Upload onUpload={handleUpload} loading={loading} error={error} />
-
-        <Result
-          result={
-            result ?? {
-              disease: "healthy",
-              confidence: 0,
-              severity: "low",
-            }
-          }
-          imageUrl={uploadedImg ?? undefined}
-          onBack={() => {
-            setResult(null);
-            setUploadedImg(null);
-          }}
-        />
-
-        <History
-          history={history}
-          onSelect={handleHistorySelect}
-          onClear={() => setHistory([])}
-        />
-
-        <div>
-          <h3 style={{ marginLeft: "16px", marginBottom: 12 }}>
-            {i18n.t("educationalVideos")}
-          </h3>
-          <select
-            value={selectedVideoKey}
-            onChange={(e) => setSelectedVideoKey(e.target.value)}
-            style={{
-              margin: "0 0 18px 16px",
-              padding: "7px 12px",
-              borderRadius: "8px",
-              border: "1px solid #ccc",
-              fontSize: "1rem",
-              display: "block",
-            }}
-          >
-            {videoEntries.map(([key, video]) => (
-              <option key={key} value={key}>
-                {video.title}
-              </option>
-            ))}
-          </select>
-          <VideoPlayer
-            videoUrl={selectedVideo.url}
-            title={selectedVideo.title}
-          />
+      {/* ── HERO BANNER ── */}
+      <section className="cg-hero">
+        <p className="cg-hero-tag">{t('heroTag')}</p>
+        <h1 className="cg-hero-title">{t('appName')}</h1>
+        <p className="cg-hero-sub">{t('tagline')}</p>
+        <div className="cg-pills">
+          <span className="cg-pill">{t('heroStat1')}</span>
+          <span className="cg-pill">{t('heroStat2')}</span>
+          <span className="cg-pill">{t('heroStat3')}</span>
         </div>
-      </div>
+      </section>
 
-      {/* --- DashboardFooter is now below all dashboard components --- */}
-      <DashboardFooter />
+      {/* ── CENTRED MAIN COLUMN ── */}
+      <main className="cg-main">
 
-      {/* Universal footer for the app */}
-      <Footer />
+        {/* Upload OR Result — only one visible at a time */}
+        {!result ? (
+          <Upload
+            onUpload={handleUpload}
+            onSample={handleSample}
+            loading={loading}
+            error={error}
+          />
+        ) : (
+          <Result
+            result={result}
+            imageUrl={uploadedImg ?? undefined}
+            onBack={() => { setResult(null); setUploadedImg(null); }}
+          />
+        )}
+
+        {/* Secondary row: History + Video */}
+        <div className="cg-secondary">
+          <History
+            history={history}
+            onSelect={handleHistorySelect}
+            onClear={() => setHistory([])}
+          />
+          <VideoSection activeDisease={selectedVideoKey} />
+        </div>
+      </main>
+
+      <AppFooter />
     </div>
   );
 };
